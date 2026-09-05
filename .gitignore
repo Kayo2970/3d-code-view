@@ -1,0 +1,16 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
+
+# graphify build cache (regenerable)
+graphify-out/cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

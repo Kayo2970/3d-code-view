@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>Graphify 3D Viewer — LEADS ERP</title>
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(16, 20, 32, 0.82);
+    --panel-solid: #121628;
+    --border: rgba(255, 255, 255, 0.10);
+    --text: #e6e9f2;
+    --muted: #9aa3bd;
+    --accent: #5db2ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #graph { position: fixed; inset: 0; }
+
+  .panel {
+    position: fixed; background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  }
+  #controls { top: 14px; left: 14px; width: 290px; bottom: calc(38vh + 24px); overflow-y: auto; overscroll-behavior: contain; }
+  #details  { top: 14px; right: 14px; width: 320px; max-height: calc(100vh - 28px); overflow-y: auto; display: none; }
+  #legend   { bottom: 14px; left: 14px; width: 290px; max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+  #hud      { bottom: 14px; right: 14px; padding: 8px 12px; color: var(--muted); font-size: 12px; text-align: right; }
+
+  #topbar { position: fixed; z-index: 30; top: 10px; left: 10px; display: none; gap: 6px; }
+  #topbar button {
+    background: var(--panel-solid); color: var(--text); border: 1px solid var(--border);
+    border-radius: 9px; padding: 9px 12px; font: 600 13px/1 inherit; cursor: pointer;
+  }
+  #topbar button.active { background: var(--accent); color: #04121f; border-color: var(--accent); }
+
+  #libfail { position: fixed; inset: 0; display: none; place-items: center; text-align: center;
+    padding: 24px; color: var(--text); background: var(--bg); z-index: 50; font-size: 15px; line-height: 1.6; }
+
+  /* ---- phones / narrow windows ---- */
+  @media (max-width: 780px) {
+    #topbar { display: flex; }
+    #controls, #legend {
+      top: 58px; left: 8px; right: 8px; width: auto; bottom: 8px; max-height: none;
+      display: none;
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+    #controls.m-open, #legend.m-open { display: block; }
+    #details {
+      top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; max-height: 62vh;
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+    #hud { display: none; }
+  }
+
+  h1 { font-size: 14px; margin: 0 0 2px; letter-spacing: .2px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 16px 0 8px; }
+  .sub { color: var(--muted); font-size: 11px; margin: 0 0 12px; }
+  label.row { display: flex; align-items: center; gap: 8px; margin: 5px 0; cursor: pointer; }
+  label.row input { accent-color: var(--accent); }
+  input[type=search], select {
+    width: 100%; background: #0c1020; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 9px; font: inherit; outline: none;
+  }
+  input[type=search]:focus, select:focus { border-color: var(--accent); }
+  .seg { display: flex; gap: 6px; margin-top: 6px; }
+  .seg button {
+    flex: 1; background: #0c1020; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 6px; cursor: pointer; font: inherit;
+  }
+  .seg button.active { background: var(--accent); color: #04121f; border-color: var(--accent); font-weight: 600; }
+  .wbtn { width: 100%; margin-top: 8px; background: #0c1020; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px; cursor: pointer; font: inherit; }
+  .wbtn:hover { border-color: var(--accent); }
+  .slider { width: 100%; accent-color: var(--accent); }
+
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; cursor: pointer; }
+  .legend-item.dim { opacity: .35; }
+  .legend-item .cnt { margin-left: auto; color: var(--muted); font-size: 11px; }
+
+  #details .kv { display: grid; grid-template-columns: 74px 1fr; gap: 4px 8px; margin: 8px 0; }
+  #details .kv div:nth-child(odd) { color: var(--muted); }
+  #details .neighbors { margin-top: 10px; }
+  #details .nb {
+    display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 7px;
+    cursor: pointer; font-size: 12px;
+  }
+  #details .nb:hover { background: rgba(255,255,255,.06); }
+  #details .rel { color: var(--muted); font-size: 10px; margin-left: auto; text-transform: uppercase; letter-spacing: .05em; }
+  .close { float: right; cursor: pointer; color: var(--muted); border: 0; background: none; font-size: 16px; line-height: 1; }
+  code { background: rgba(255,255,255,.07); padding: 1px 5px; border-radius: 4px; font-size: 11px; word-break: break-all; }
+  a.link { color: var(--accent); text-decoration: none; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 10px; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="loading">Loading graph…</div>
+<div id="libfail">
+  <div>
+    <p><b>Couldn't load the 3D engine.</b></p>
+    <p>This viewer downloads its graphics library the first time it runs,<br>so it needs an internet connection on first open. Reconnect and reload.</p>
+  </div>
+</div>
+
+<div id="topbar">
+  <button data-panel="controls">☰ Controls</button>
+  <button data-panel="legend">▤ Legend</button>
+</div>
+
+<div id="controls" class="panel">
+  <h1>Graphify 3D Viewer</h1>
+  <p class="sub" id="metaLine">—</p>
+
+  <input type="search" id="search" placeholder="Search nodes (name / file)…" autocomplete="off" />
+
+  <h2>Layout</h2>
+  <div class="seg" id="layoutSeg">
+    <button data-layout="force" class="active">Force cloud</button>
+    <button data-layout="sphere">Sphere shell</button>
+  </div>
+  <div style="margin-top:8px">Node spacing: <span id="spacingVal" style="color:var(--muted)">1.0×</span>
+    <input class="slider" type="range" id="spacing" min="50" max="600" value="100">
+  </div>
+
+  <h2>Performance</h2>
+  <div class="seg" id="qualitySeg">
+    <button data-q="perf">Performance</button>
+    <button data-q="balanced" class="active">Balanced</button>
+    <button data-q="high">High</button>
+  </div>
+  <label class="row" style="margin-top:8px"><input type="checkbox" id="freezeAfter" checked> Freeze layout once settled</label>
+  <button id="rerun" class="wbtn">Re-run layout</button>
+  <p class="hint" id="perfHud" style="margin-top:6px">renderer: …</p>
+
+  <h2>Colour by</h2>
+  <div class="seg" id="colorSeg">
+    <button data-color="community" class="active">Community</button>
+    <button data-color="type">File type</button>
+    <button data-color="origin">Origin</button>
+  </div>
+
+  <h2>Show node types</h2>
+  <div id="typeFilters"></div>
+
+  <h2>Display</h2>
+  <label class="row"><input type="checkbox" id="showLabels"> Always show labels</label>
+  <label class="row"><input type="checkbox" id="curvedLinks"> Curved links</label>
+  <label class="row"><input type="checkbox" id="dirParticles"> Link flow particles</label>
+  <div style="margin-top:8px">Link opacity: <span id="linkOpacityVal" style="color:var(--muted)">0.55</span>
+    <input class="slider" type="range" id="linkOpacity" min="0" max="100" value="55">
+  </div>
+  <div>Min degree to show: <span id="minDegVal" style="color:var(--muted)">0</span>
+    <input class="slider" type="range" id="minDeg" min="0" max="300" value="0">
+  </div>
+  <div style="margin-top:6px">Max degree to show: <span id="maxDegVal" style="color:var(--muted)">∞</span>
+    <input class="slider" type="range" id="maxDeg" min="1" max="200" value="200">
+  </div>
+
+  <p class="hint">Drag to orbit · scroll to zoom · click a node to inspect · click background to reset. Tick "show only connections" in a node's panel to isolate its links.</p>
+</div>
+
+<div id="details" class="panel">
+  <button class="close" id="detailsClose">×</button>
+  <h1 id="dTitle">—</h1>
+  <p class="sub" id="dCommunity">—</p>
+  <label class="row" id="isoRow" style="margin:10px 0"><input type="checkbox" id="isoToggle">
+    <span>Show <b>only</b> this node &amp; what it connects to</span></label>
+  <div class="kv" id="dKv"></div>
+  <div class="neighbors">
+    <h2 style="margin-top:4px">Connections (<span id="dNbCount">0</span>)</h2>
+    <div id="dNeighbors"></div>
+  </div>
+</div>
+
+<div id="legend" class="panel">
+  <h2 style="margin-top:0">Legend <span id="legendMode" style="color:var(--muted);text-transform:none;letter-spacing:0"></span></h2>
+  <div id="legendItems"></div>
+</div>
+
+<div id="hud" class="panel">
+  <span id="hudVisible">—</span>
+</div>
+
+<script src="./graph-data.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script>
+(async function () {
+  "use strict";
+  if (typeof ForceGraph3D === "undefined" || typeof THREE === "undefined") {
+    document.getElementById("loading").remove();
+    document.getElementById("libfail").style.display = "grid";
+    return;
+  }
+
+  const narrowMQ = window.matchMedia("(max-width: 780px)");
+  const isTouch = narrowMQ.matches || window.matchMedia("(pointer: coarse)").matches;
+
+  // ---------- data source ----------
+  // When served over http (see serve.py) the viewer reads graphify-out/graph.json
+  // live, so `graphify update .` shows up on the next refresh — and it polls that
+  // file and reloads itself automatically when it changes. Opened as a plain file
+  // (or offline), it falls back to the snapshot baked into graph-data.js.
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
+  const GRAPH_URL = "../graphify-out/graph.json";
+  const LABELS_URL = "../graphify-out/.graphify_labels.json";
+  let LIVE = false;
+
+  function normalizeRaw(g, labels) {
+    const deg = Object.create(null);
+    for (const l of g.links) { deg[l.source] = (deg[l.source] || 0) + 1; deg[l.target] = (deg[l.target] || 0) + 1; }
+    const nodes = g.nodes.map(n => ({
+      id: n.id, label: n.label || "", ft: n.file_type || "",
+      com: (n.community == null ? -1 : n.community),
+      sf: n.source_file || "", loc: n.source_location || "", og: n._origin || "",
+      k: (n.metadata && n.metadata.kind) || "", deg: deg[n.id] || 0,
+    }));
+    const links = g.links.map(l => ({ s: l.source, t: l.target, r: l.relation || "", c: l.confidence || "" }));
+    const communitySizes = Object.create(null);
+    for (const n of nodes) communitySizes[n.com] = (communitySizes[n.com] || 0) + 1;
+    return {
+      meta: { built_at_commit: g.built_at_commit, n_nodes: nodes.length, n_links: links.length },
+      communityLabels: labels || {}, communitySizes, nodes, links,
+    };
+  }
+  async function graphStamp() {
+    try {
+      const r = await fetch(GRAPH_URL, { method: "HEAD", cache: "no-store" });
+      return r.headers.get("last-modified") || r.headers.get("etag") || r.headers.get("content-length");
+    } catch (e) { return null; }
+  }
+  async function loadData() {
+    if (SERVED) {
+      try {
+        const g = await fetch(GRAPH_URL, { cache: "no-store" }).then(r => { if (!r.ok) throw 0; return r.json(); });
+        const labels = await fetch(LABELS_URL, { cache: "no-store" }).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+        LIVE = true;
+        return normalizeRaw(g, labels);
+      } catch (e) { /* fall through to baked snapshot */ }
+    }
+    return window.GRAPH_DATA || null;
+  }
+
+  const DATA = await loadData();
+  if (!DATA) {
+    document.getElementById("loading").textContent =
+      SERVED ? "Could not load graphify-out/graph.json." : "graph-data.js failed to load.";
+    return;
+  }
+
+  if (LIVE) {
+    let stamp = await graphStamp();
+    setInterval(async () => {
+      if (document.hidden) return;
+      const s = await graphStamp();
+      if (s && stamp && s !== stamp) location.reload();
+      stamp = s || stamp;
+    }, 5000);
+  }
+
+  // ---------- index & derived state ----------
+  const nodeById = new Map(DATA.nodes.map(n => [n.id, n]));
+  DATA.nodes.forEach(n => { n.neighbors = []; n.links = []; });
+  const links = DATA.links.filter(l => nodeById.has(l.s) && nodeById.has(l.t)).map(l => ({
+    source: l.s, target: l.t, relation: l.r, confidence: l.c
+  }));
+  links.forEach(l => {
+    const a = nodeById.get(l.source), b = nodeById.get(l.target);
+    a.neighbors.push(b); b.neighbors.push(a);
+    a.links.push(l); b.links.push(l);
+  });
+
+  const TYPES = [...new Set(DATA.nodes.map(n => n.ft))].sort();
+  const TYPE_COLORS = {
+    code: "#5db2ff", document: "#ffd166", concept: "#c792ea",
+    rationale: "#ff8fab", image: "#4dd6a8"
+  };
+  const ORIGIN_COLORS = { ast: "#5db2ff", semantic: "#ff9f68" };
+
+  // stable-ish distinct colour per community via golden-angle hue
+  const communityColor = c => {
+    if (c < 0) return "#888";
+    const h = (c * 137.508) % 360;
+    const s = 62 + (c % 3) * 10;
+    const l = 55 + (c % 2) * 8;
+    return `hsl(${h.toFixed(0)} ${s}% ${l}%)`;
+  };
+
+  const state = {
+    layout: "force",
+    color: "community",
+    typesOn: new Set(TYPES),
+    minDeg: 0,
+    maxDeg: Infinity,
+    spacing: 1,
+    selected: null,
+    legendDim: new Set(),   // community ids or type keys toggled off in legend
+    isoSticky: false,       // "only show connections" checkbox in the details panel
+    isoId: null,            // node currently isolated
+    isoSet: null,           // Set of ids visible while isolated (node + its neighbours)
+  };
+
+  const maxDeg = Math.max(...DATA.nodes.map(n => n.deg), 1);
+
+  function nodeColor(n) {
+    if (state.color === "type")   return TYPE_COLORS[n.ft] || "#9aa3bd";
+    if (state.color === "origin") return ORIGIN_COLORS[n.og] || "#9aa3bd";
+    return communityColor(n.com);
+  }
+  function nodeVal(n) { return Math.min(1.2 + Math.sqrt(n.deg) * 1.1, 13); }
+
+  // labels: only ever draw the strongest hubs so we don't build ~1000 canvas sprites
+  const LABEL_IDS = new Set(
+    [...DATA.nodes].sort((a, b) => b.deg - a.deg).slice(0, 70).map(n => n.id)
+  );
+
+  const QUALITY = {
+    perf:     { res: 6,  aa: false, dpr: 1,    nodeOpacity: 1,    linkRes: 3 },
+    balanced: { res: 8,  aa: true,  dpr: 1.5,  nodeOpacity: 1,    linkRes: 6 },
+    high:     { res: 14, aa: true,  dpr: 2,    nodeOpacity: 0.9,  linkRes: 9 },
+  };
+  let quality = isTouch ? "perf" : "balanced";
+
+  function nodeVisible(n) {
+    // "only show connections" mode overrides every other filter
+    if (state.isoSet) return state.isoSet.has(n.id);
+    if (!state.typesOn.has(n.ft)) return false;
+    if (n.deg < state.minDeg || n.deg > state.maxDeg) return false;
+    if (state.color === "community" && state.legendDim.has("c" + n.com)) return false;
+    if (state.color === "type" && state.legendDim.has("t" + n.ft)) return false;
+    if (state.color === "origin" && state.legendDim.has("o" + n.og)) return false;
+    return true;
+  }
+
+  // ---------- highlight ----------
+  let hlNodes = new Set(), hlLinks = new Set();
+  function setHighlight(n) {
+    hlNodes = new Set(); hlLinks = new Set();
+    if (n) {
+      hlNodes.add(n.id);
+      n.neighbors.forEach(m => hlNodes.add(m.id));
+      n.links.forEach(l => hlLinks.add(l));
+    }
+  }
+
+  // ---------- graph ----------
+  const el = document.getElementById("graph");
+  const Graph = ForceGraph3D({
+    controlType: "orbit",
+    rendererConfig: { antialias: QUALITY[quality].aa, powerPreference: "high-performance" }
+  })(el)
+    .backgroundColor("#05070d")
+    .graphData({ nodes: DATA.nodes, links })
+    .nodeId("id")
+    .nodeLabel(n => `<div style="padding:3px 6px;background:#0c1020;border:1px solid #333;border-radius:6px;font:12px sans-serif;color:#e6e9f2">
+        <b>${escapeHtml(n.label)}</b><br><span style="color:#9aa3bd">${escapeHtml(n.ft)} · ${escapeHtml(n.sf)}</span></div>`)
+    .nodeVal(nodeVal)
+    .nodeColor(n => {
+      const base = nodeColor(n);
+      if (hlNodes.size === 0) return base;
+      return hlNodes.has(n.id) ? base : "#2a2f3d";
+    })
+    .nodeOpacity(QUALITY[quality].nodeOpacity)
+    .nodeResolution(QUALITY[quality].res)
+    .nodeVisibility(nodeVisible)
+    .linkVisibility(linkVisible)
+    .linkColor(l => hlLinks.has(l) ? "#ffffff" : (hlLinks.size ? "#3b4358" : "#9fb2da"))
+    .linkWidth(l => hlLinks.has(l) ? 1.8 : 0.6)
+    .linkResolution(QUALITY[quality].linkRes)
+    .linkOpacity(0.55)
+    .warmupTicks(20)
+    .cooldownTime(6000)
+    .onNodeClick(focusNode)
+    .onBackgroundClick(() => selectNode(null))
+    .onNodeHover(n => { el.style.cursor = n ? "pointer" : "default"; })
+    .onEngineStop(() => {
+      settling = false;
+      document.getElementById("perfHud").textContent = gpuLine();
+      if (document.getElementById("freezeAfter").checked && state.layout === "force") {
+        DATA.nodes.forEach(n => { n.fx = n.x; n.fy = n.y; n.fz = n.z; });
+      }
+    });
+
+  // Tighter, faster physics: cap the long-range repulsion so the graph stays a
+  // cohesive ball instead of flinging isolated nodes to infinity (also much faster/tick).
+  const BASE_CHARGE = -55, BASE_LINKDIST = 24, BASE_CHARGE_MAX = 260;
+  Graph.d3VelocityDecay(0.35);
+  applyForces();
+  function applyForces() {
+    const s = state.spacing;
+    Graph.d3Force("charge").strength(BASE_CHARGE * s).distanceMax(BASE_CHARGE_MAX * Math.max(1, s));
+    const lf = Graph.d3Force("link");
+    if (lf) lf.distance(BASE_LINKDIST * s).strength(0.7);
+  }
+  // re-spread the graph when the spacing slider moves
+  let spacingTimer = 0;
+  function applySpacing() {
+    clearTimeout(spacingTimer);
+    spacingTimer = setTimeout(() => {
+      if (state.layout === "sphere") { applyLayout(); return; }
+      applyForces();
+      DATA.nodes.forEach(n => { n.fx = n.fy = n.fz = undefined; });
+      settling = true;
+      Graph.cooldownTicks(Infinity)
+        .cooldownTime(Math.min(20000, Math.round(6000 * Math.max(1, state.spacing))))
+        .d3ReheatSimulation();
+    }, 140);
+  }
+
+  let settling = true;
+
+  // cap pixel ratio — HiDPI screens otherwise render 4-9x the pixels
+  applyPixelRatio();
+  function applyPixelRatio() {
+    try {
+      const r = Graph.renderer();
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY[quality].dpr));
+    } catch (e) {}
+  }
+  function gpuLine() {
+    try {
+      const gl = Graph.renderer().getContext();
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "WebGL";
+      const soft = /swiftshader|software|llvmpipe|basic render/i.test(name);
+      return (soft ? "⚠ software render — " : "GPU: ") + String(name).replace(/^ANGLE \(|\)$/g, "").slice(0, 46);
+    } catch (e) { return "renderer: unknown"; }
+  }
+  document.getElementById("perfHud").textContent = gpuLine();
+
+  // pause the render loop when the tab is hidden
+  document.addEventListener("visibilitychange", () => {
+    document.hidden ? Graph.pauseAnimation() : Graph.resumeAnimation();
+  });
+
+  document.getElementById("loading").remove();
+  DATA.meta && (document.getElementById("metaLine").textContent =
+    `${DATA.meta.n_nodes} nodes · ${DATA.meta.n_links} edges · commit ${(DATA.meta.built_at_commit||"?").slice(0,8)}`);
+
+  function idOf(x) { return typeof x === "object" ? x.id : x; }
+  function linkVisible(l) {
+    const sa = idOf(l.source), sb = idOf(l.target);
+    // isolate mode: only the star of links touching the isolated node
+    if (state.isoId) return sa === state.isoId || sb === state.isoId;
+    const a = nodeById.get(sa), b = nodeById.get(sb);
+    return !!a && !!b && nodeVisible(a) && nodeVisible(b);
+  }
+  function refresh() {
+    Graph.nodeColor(Graph.nodeColor())
+         .linkColor(Graph.linkColor())
+         .linkWidth(Graph.linkWidth())
+         .nodeVisibility(nodeVisible)
+         .linkVisibility(Graph.linkVisibility());
+    updateHud();
+  }
+
+  // ---------- layouts ----------
+  function applyLayout() {
+    const nodes = DATA.nodes;
+    if (state.layout === "sphere") {
+      // group by community, lay communities as patches on a fibonacci sphere
+      const R = Math.max(120, Math.sqrt(nodes.length) * 12) * state.spacing;
+      const comms = [...new Set(nodes.map(n => n.com))].sort((a,b)=>a-b);
+      const cCenter = new Map();
+      const gold = Math.PI * (3 - Math.sqrt(5));
+      comms.forEach((c, i) => {
+        const y = 1 - (i / Math.max(comms.length - 1, 1)) * 2;
+        const r = Math.sqrt(Math.max(0, 1 - y*y));
+        const th = gold * i;
+        cCenter.set(c, [Math.cos(th)*r, y, Math.sin(th)*r]);
+      });
+      const perComm = new Map();
+      nodes.forEach(n => perComm.set(n.com, (perComm.get(n.com)||0) + 1));
+      const seen = new Map();
+      nodes.forEach(n => {
+        const k = seen.get(n.com) || 0; seen.set(n.com, k + 1);
+        const cnt = perComm.get(n.com);
+        const [cx, cy, cz] = cCenter.get(n.com);
+        // small local fibonacci disc around the community centre direction
+        const spread = 0.28;
+        const a = gold * k;
+        const rr = spread * Math.sqrt((k + 0.5) / cnt);
+        let v = [cx + Math.cos(a)*rr, cy + (Math.random()-0.5)*spread*0.4, cz + Math.sin(a)*rr];
+        const len = Math.hypot(v[0], v[1], v[2]) || 1;
+        n.fx = v[0]/len * R; n.fy = v[1]/len * R; n.fz = v[2]/len * R;
+      });
+      settling = false;
+      Graph.cooldownTicks(0);
+      Graph.numDimensions(3);
+      Graph.graphData(Graph.graphData());
+    } else {
+      nodes.forEach(n => { n.fx = n.fy = n.fz = undefined; });
+      settling = true;
+      Graph.cooldownTicks(Infinity).cooldownTime(6000);
+      Graph.d3ReheatSimulation();
+    }
+  }
+
+  // ---------- selection / details ----------
+  function updateIsolation() {
+    if (state.isoSticky && state.selected) {
+      state.isoId = state.selected.id;
+      state.isoSet = new Set([state.selected.id, ...state.selected.neighbors.map(m => m.id)]);
+    } else {
+      state.isoId = null;
+      state.isoSet = null;
+    }
+    const off = !!state.isoSet;
+    ["minDeg", "maxDeg"].forEach(id => {
+      const s = document.getElementById(id);
+      if (s) { s.disabled = off; s.style.opacity = off ? 0.4 : 1; }
+    });
+  }
+  function zoomToVisible() {
+    try { Graph.zoomToFit(700, 60, n => nodeVisible(n)); } catch (e) {}
+  }
+  function selectNode(n) {
+    state.selected = n;
+    setHighlight(n);
+    updateIsolation();
+    refresh();
+    renderDetails(n);
+  }
+  function focusNode(n) {
+    selectNode(n);
+    closePanelsOnTouch();
+    const d = 90;
+    const dist = Math.hypot(n.x, n.y, n.z) || 1;
+    const r = 1 + d / dist;
+    Graph.cameraPosition({ x: n.x * r, y: n.y * r, z: n.z * r }, n, 900);
+  }
+
+  const details = document.getElementById("details");
+  document.getElementById("detailsClose").onclick = () => selectNode(null);
+  document.getElementById("isoToggle").addEventListener("change", e => {
+    state.isoSticky = e.target.checked;
+    updateIsolation();
+    refresh();
+    if (state.isoSet) zoomToVisible();
+  });
+  function renderDetails(n) {
+    if (!n) { details.style.display = "none"; return; }
+    details.style.display = "block";
+    document.getElementById("isoToggle").checked = state.isoSticky;
+    document.getElementById("dTitle").textContent = n.label;
+    const cl = DATA.communityLabels && DATA.communityLabels[n.com];
+    document.getElementById("dCommunity").innerHTML =
+      `<span class="swatch" style="display:inline-block;background:${communityColor(n.com)}"></span> Community ${n.com}${cl ? " · " + escapeHtml(cl) : ""}`;
+    const kv = document.getElementById("dKv");
+    kv.innerHTML = "";
+    const rows = [
+      ["Type", n.ft], ["Kind", n.k || "—"], ["Origin", n.og],
+      ["Degree", String(n.deg)],
+      ["File", `<code>${escapeHtml(n.sf)}</code>`],
+      ["Location", n.loc || "—"],
+    ];
+    rows.forEach(([k, v]) => {
+      const a = document.createElement("div"); a.textContent = k;
+      const b = document.createElement("div"); b.innerHTML = v;
+      kv.append(a, b);
+    });
+    const nb = document.getElementById("dNeighbors"); nb.innerHTML = "";
+    const seen = new Set();
+    const items = n.links.map(l => {
+      const other = nodeById.get(idOf(l.source) === n.id ? idOf(l.target) : idOf(l.source));
+      return { other, rel: l.relation };
+    }).filter(x => x.other && !seen.has(x.other.id) && seen.add(x.other.id))
+      .sort((a, b) => b.other.deg - a.other.deg);
+    document.getElementById("dNbCount").textContent = items.length;
+    items.forEach(({ other, rel }) => {
+      const row = document.createElement("div"); row.className = "nb";
+      row.innerHTML = `<span class="swatch" style="background:${nodeColor(other)}"></span>
+        <span>${escapeHtml(other.label)}</span><span class="rel">${escapeHtml(rel)}</span>`;
+      row.onclick = () => focusNode(other);
+      nb.appendChild(row);
+    });
+  }
+
+  // ---------- controls ----------
+  document.getElementById("layoutSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.classList.toggle("active", x === b));
+    state.layout = b.dataset.layout;
+    applyLayout();
+  });
+  document.getElementById("colorSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.classList.toggle("active", x === b));
+    state.color = b.dataset.color;
+    state.legendDim.clear();
+    buildLegend(); refresh();
+  });
+
+  const tf = document.getElementById("typeFilters");
+  TYPES.forEach(t => {
+    const l = document.createElement("label"); l.className = "row";
+    l.innerHTML = `<input type="checkbox" checked><span class="swatch" style="background:${TYPE_COLORS[t]||'#9aa3bd'}"></span>${t}`;
+    l.querySelector("input").addEventListener("change", ev => {
+      ev.target.checked ? state.typesOn.add(t) : state.typesOn.delete(t);
+      refresh();
+    });
+    tf.appendChild(l);
+  });
+
+  document.getElementById("showLabels").addEventListener("change", e => {
+    if (e.target.checked) {
+      Graph.nodeThreeObjectExtend(true).nodeThreeObject(n => {
+        if (!LABEL_IDS.has(n.id) || !nodeVisible(n)) return null;
+        return new SpriteText(n.label);
+      });
+    } else {
+      Graph.nodeThreeObject(null);
+    }
+  });
+  document.getElementById("curvedLinks").addEventListener("change", e => {
+    Graph.linkCurvature(e.target.checked ? 0.25 : 0);
+  });
+  document.getElementById("dirParticles").addEventListener("change", e => {
+    Graph.linkDirectionalParticles(e.target.checked ? 2 : 0).linkDirectionalParticleWidth(1.6);
+  });
+  document.getElementById("linkOpacity").addEventListener("input", e => {
+    const v = e.target.value / 100;
+    Graph.linkOpacity(v);
+    document.getElementById("linkOpacityVal").textContent = v.toFixed(2);
+  });
+  const minDegVal = document.getElementById("minDegVal");
+  let refreshQueued = false;
+  function refreshSoon() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    requestAnimationFrame(() => { refreshQueued = false; refresh(); });
+  }
+  document.getElementById("minDeg").addEventListener("input", e => {
+    state.minDeg = +e.target.value; minDegVal.textContent = e.target.value; refreshSoon();
+  });
+
+  const spacingVal = document.getElementById("spacingVal");
+  document.getElementById("spacing").addEventListener("input", e => {
+    state.spacing = +e.target.value / 100;
+    spacingVal.textContent = state.spacing.toFixed(1) + "×";
+    applySpacing();
+  });
+
+  const maxDegSlider = document.getElementById("maxDeg");
+  const maxDegVal = document.getElementById("maxDegVal");
+  maxDegSlider.max = String(maxDeg);
+  maxDegSlider.value = String(maxDeg);
+  maxDegSlider.addEventListener("input", e => {
+    const v = +e.target.value;
+    state.maxDeg = v >= maxDeg ? Infinity : v;
+    maxDegVal.textContent = v >= maxDeg ? "∞" : String(v);
+    refreshSoon();
+  });
+
+  // performance / quality
+  document.getElementById("qualitySeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.classList.toggle("active", x === b));
+    quality = b.dataset.q;
+    const q = QUALITY[quality];
+    Graph.nodeResolution(q.res).linkResolution(q.linkRes).nodeOpacity(q.nodeOpacity);
+    applyPixelRatio();
+    document.getElementById("perfHud").textContent = gpuLine();
+  });
+  document.getElementById("rerun").addEventListener("click", () => {
+    DATA.nodes.forEach(n => { n.fx = n.fy = n.fz = undefined; });
+    settling = true;
+    Graph.cooldownTicks(Infinity).cooldownTime(6000).d3ReheatSimulation();
+  });
+  // reflect the starting quality (phones start on "Performance")
+  [...document.getElementById("qualitySeg").children]
+    .forEach(b => b.classList.toggle("active", b.dataset.q === quality));
+
+  // ---------- collapsible panels (phones) ----------
+  const panelEls = { controls: document.getElementById("controls"), legend: document.getElementById("legend") };
+  let openPanel = null;
+  function setPanel(name) {
+    openPanel = openPanel === name ? null : name;
+    if (openPanel && narrowMQ.matches) selectNode(null);
+    for (const k in panelEls) panelEls[k].classList.toggle("m-open", k === openPanel);
+    [...document.getElementById("topbar").children]
+      .forEach(b => b.classList.toggle("active", b.dataset.panel === openPanel));
+  }
+  document.getElementById("topbar").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (b) setPanel(b.dataset.panel);
+  });
+  function closePanelsOnTouch() { if (narrowMQ.matches && openPanel) setPanel(openPanel); }
+
+  // search
+  const search = document.getElementById("search");
+  search.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    const q = search.value.trim().toLowerCase();
+    if (!q) return;
+    const hit = DATA.nodes
+      .filter(n => n.label.toLowerCase().includes(q) || n.sf.toLowerCase().includes(q))
+      .sort((a, b) => b.deg - a.deg)[0];
+    if (hit) focusNode(hit);
+  });
+
+  // ---------- legend ----------
+  function buildLegend() {
+    const box = document.getElementById("legendItems");
+    const mode = document.getElementById("legendMode");
+    box.innerHTML = "";
+    let entries = [];
+    if (state.color === "type") {
+      mode.textContent = "(file type)";
+      entries = TYPES.map(t => ({ key: "t" + t, color: TYPE_COLORS[t] || "#9aa3bd", label: t,
+        count: DATA.nodes.filter(n => n.ft === t).length }));
+    } else if (state.color === "origin") {
+      mode.textContent = "(extraction origin)";
+      entries = Object.keys(ORIGIN_COLORS).map(o => ({ key: "o" + o, color: ORIGIN_COLORS[o], label: o,
+        count: DATA.nodes.filter(n => n.og === o).length }));
+    } else {
+      mode.textContent = "(top communities)";
+      const sizes = DATA.communitySizes || {};
+      entries = Object.keys(sizes).map(c => +c)
+        .sort((a, b) => sizes[b] - sizes[a]).slice(0, 40)
+        .map(c => ({ key: "c" + c, color: communityColor(c),
+          label: (DATA.communityLabels && DATA.communityLabels[c]) || ("Community " + c),
+          count: sizes[c] }));
+    }
+    entries.forEach(en => {
+      const row = document.createElement("div");
+      row.className = "legend-item" + (state.legendDim.has(en.key) ? " dim" : "");
+      row.innerHTML = `<span class="swatch" style="background:${en.color}"></span>
+        <span>${escapeHtml(en.label)}</span><span class="cnt">${en.count}</span>`;
+      row.onclick = () => {
+        state.legendDim.has(en.key) ? state.legendDim.delete(en.key) : state.legendDim.add(en.key);
+        buildLegend(); refresh();
+      };
+      box.appendChild(row);
+    });
+  }
+
+  function updateHud() {
+    const vis = DATA.nodes.filter(nodeVisible).length;
+    const hud = document.getElementById("hudVisible");
+    if (state.isoSet) {
+      hud.textContent = `Isolated: ${state.selected.label} — ${state.isoSet.size - 1} connections`;
+    } else {
+      hud.textContent = `${vis} / ${DATA.nodes.length} nodes shown`;
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // minimal SpriteText (avoid extra CDN dependency)
+  class SpriteText extends THREE.Sprite {
+    constructor(text) {
+      const cv = document.createElement("canvas");
+      const ctx = cv.getContext("2d");
+      const font = "600 40px sans-serif";
+      ctx.font = font;
+      const w = ctx.measureText(text).width;
+      cv.width = w + 20; cv.height = 52;
+      ctx.font = font;
+      ctx.fillStyle = "rgba(230,233,242,0.95)";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, 10, 28);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.minFilter = THREE.LinearFilter;
+      super(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+      this.scale.set(cv.width / 6, cv.height / 6, 1);
+      this.position.set(0, 6, 0);
+    }
+  }
+
+  buildLegend();
+  updateHud();
+  window.addEventListener("resize", () => Graph.width(innerWidth).height(innerHeight));
+})();
+</script>
+</body>
+</html>
